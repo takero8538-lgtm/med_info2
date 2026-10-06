@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>薬品棚卸し</title>
+<style>
+:root{--bg:#f5f7fa;--card:#fff;--tx:#1b2430;--sub:#6b7686;--pri:#0b7a75;--bd:#dde3ea;--warn:#c2410c;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10151b;--card:#1a222c;--tx:#e8edf3;--sub:#93a0b0;--pri:#2ec4b6;--bd:#2a3542;--warn:#fb923c}}
+:root[data-theme="dark"]{--bg:#10151b;--card:#1a222c;--tx:#e8edf3;--sub:#93a0b0;--pri:#2ec4b6;--bd:#2a3542;--warn:#fb923c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;padding:12px;max-width:560px;margin:0 auto}
+h1{font-size:18px;margin:4px 0 12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:12px}
+button{font:inherit;border:0;border-radius:10px;padding:12px 14px;background:var(--pri);color:#fff;font-weight:600}
+button.sec{background:transparent;color:var(--pri);border:1px solid var(--pri)}
+button.del{background:transparent;color:var(--warn);padding:6px 8px}
+input,textarea{font:inherit;width:100%;padding:12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx)}
+.row{display:flex;gap:8px;align-items:center}
+.sub{color:var(--sub);font-size:12px;word-break:break-all}
+#reader{width:100%;border-radius:10px;overflow:hidden;margin-top:10px}
+.name{font-size:20px;font-weight:700;margin:4px 0}
+.cnt{font-size:28px;text-align:center;font-weight:700}
+.sq{width:56px;font-size:24px;padding:10px}
+.item{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--bd)}
+.item:last-child{border:0}
+.item b{font-size:18px;margin:0 8px;white-space:nowrap}
+details summary{font-weight:600;padding:4px 0}
+.hidden{display:none}
+.err{color:var(--warn);font-size:13px;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>💊 薬品 棚卸し</h1>
+<div class="sub" id="mstat" style="margin:-6px 0 10px">薬品データ読み込み中…</div>
+
+<div class="card">
+  <div class="row">
+    <button id="scanBtn" style="flex:1">📷 バーコードを読み取る</button>
+  </div>
+  <div id="reader" class="hidden"></div>
+  <div id="vwrap" class="hidden" style="position:relative;margin-top:10px">
+    <video id="vid" playsinline muted style="width:100%;border-radius:10px;background:#000"></video>
+    <div style="position:absolute;left:5%;right:5%;top:30%;bottom:30%;border:2px solid #2ec4b6;border-radius:8px;pointer-events:none"></div>
+    <div class="sub">枠の中にバーコードを入れ、ピントが合う距離で止めてください。小さい場合はズームを使います。</div>
+    <input type="range" id="zoom" class="hidden" style="width:100%;padding:0">
+  </div>
+  <div id="camErr" class="err hidden"></div>
+  <div class="row" style="margin-top:10px"><button class="sec" id="photoBtn" style="flex:1">🖼 写真を撮って読み取る（カメラ許可 不要）</button></div>
+  <div class="row" style="margin-top:10px"><button class="sec" id="ocrBtn" style="flex:1">🔢 印字された数字を撮影して読み取る</button></div>
+  <input type="file" id="ocrIn" accept="image/*" capture="environment" class="hidden">
+  <input id="nameQ" placeholder="🔎 薬品名で検索（例：カロナール）" style="margin-top:10px"><div id="nameRes"></div>
+  <input type="file" id="photoIn" accept="image/*" capture="environment" class="hidden"><div id="hid" class="hidden"></div>
+  <div class="row" style="margin-top:10px">
+    <input id="manual" inputmode="numeric" placeholder="コードを手入力（カメラが使えない場合）">
+    <button class="sec" id="manualBtn">検索</button>
+  </div>
+</div>
+
+<div class="card hidden" id="cur">
+  <div class="sub">読み取り結果</div>
+  <div id="nameView" class="name"></div>
+  <div id="regBox" class="hidden">
+    <div class="err" style="margin:0 0 6px">未登録のコードです。商品名を入力してください</div>
+    <div class="sub" id="lookupMsg" style="margin-bottom:6px"></div>
+    <input id="regName" placeholder="商品名">
+  </div>
+  <div class="sub" id="codeView"></div>
+  <div class="row" style="margin-top:8px"><a id="gLink" target="_blank" rel="noopener" style="color:var(--pri);font-weight:600">🔍 Googleで検索</a><a id="yLink" target="_blank" rel="noopener" style="color:var(--pri);font-weight:600;margin-left:16px">🛒 Yahoo!で検索</a></div>
+  <div class="sub" style="margin-top:12px">数量（手入力）</div>
+  <div class="row">
+    <button class="sec sq" id="minus">−</button>
+    <input id="count" class="cnt" type="number" inputmode="numeric" min="0" placeholder="0">
+    <button class="sec sq" id="plus">＋</button>
+  </div>
+  <button id="save" style="width:100%;margin-top:12px">保存</button>
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between"><b>棚卸し一覧（<span id="total">0</span>品目）</b>
+  <button class="sec" id="copyBtn" style="padding:8px 10px">CSVコピー</button></div>
+  <div id="list"></div>
+  <textarea id="csvOut" class="hidden" rows="6" readonly></textarea>
+  <div class="row" style="margin-top:8px"><button class="del" id="clearAll">一覧をすべて消去</button></div>
+</div>
+
+<div class="card">
+  <details><summary>商品名の自動取得の設定</summary>
+    <div class="sub" style="margin:6px 0">任意：Yahoo!デベロッパーネットワークの無料Client IDを入れると、Yahoo!ショッピングでも検索します（未設定でもOpen Food Factsで検索）。</div>
+    <input id="appid" placeholder="Client ID"><button id="idSave" style="margin-top:8px">保存</button> <span class="sub" id="idMsg"></span>
+    <div class="sub" style="margin-top:8px"><a href="https://developer.yahoo.co.jp/sitemap/" style="color:var(--pri)">Web Services by Yahoo! JAPAN</a></div>
+  </details>
+</div>
+
+<div class="card">
+  <details>
+    <summary>商品マスタ登録（任意）</summary>
+    <div class="sub" style="margin:6px 0"><b>商品名を自動表示するには：</b>医薬品のコードと名称が入ったCSV（例：MEDIS-DCの医薬品HOTコードマスター）を選ぶと、読み取った瞬間に商品名が出ます。</div>
+    <input type="file" id="masterFile" accept=".csv,.txt">
+    <div id="mapBox" class="hidden" style="margin:8px 0">
+      <div class="sub">コードの列</div><select id="colCode" style="width:100%;padding:10px"></select>
+      <div class="sub" style="margin-top:6px">商品名の列</div><select id="colName" style="width:100%;padding:10px"></select>
+      <button id="mapGo" style="width:100%;margin-top:8px">この列で取り込む</button>
+    </div>
+    <div class="sub" id="mapMsg"></div>
+    <div class="sub" style="margin:10px 0 6px">手入力で貼り付ける場合：1行に「コード,商品名」の形式で貼り付けて取り込めます。未登録の薬品は初回読み取り時に名前を入力すれば、次回から自動表示されます。</div>
+    <textarea id="masterIn" rows="5" placeholder="4987123456789,ロキソニン錠60mg"></textarea>
+    <button class="sec" id="importBtn" style="margin-top:8px">取り込む</button>
+    <span class="sub" id="masterCnt"></span>
+  </details>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/zxing-wasm@2/dist/iife/reader/index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+function load(k,d){try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}}
+function store(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){return false}}
+let builtin={};
+fetch('master.json?v='+Date.now()).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).then(j=>{if(!j.c||!j.n)throw new Error('形式が古い');builtin=j;$('mstat').textContent='薬品データ '+Object.keys(j.c).length+'件 読み込み済み';render()}).catch(e=>{$('mstat').innerHTML='<span class="err">薬品データ(master.json)を読み込めません: '+e.message+'<br>index.htmlと同じ場所に最新のmaster.jsonを置いてください</span>'});
+const nameOf=c=>{if(master[c])return master[c];const v=builtin.c&&builtin.c[String(c).slice(-13)];return v===undefined?'':builtin.n[v>>2]+['','（販売包装）','（元梱包装）'][v&3]};
+let master=load('master',{}), inv=load('inv',{}), curCode=null, scanner=null, busy=false;
+
+// GS1-128等から商品コード(GTIN)を取り出す
+function normalize(raw){
+  let s=String(raw).replace(/^\][A-Za-z]\d/,'').replace(/[()\s]/g,'');
+  if(/^01\d{14}/.test(s)) s=s.slice(2,16);
+  if(/^\d{14}$/.test(s)&&s[0]==='0') s=s.slice(1);
+  return s;
+}
+function beep(){try{navigator.vibrate&&navigator.vibrate(80);const a=new (window.AudioContext||window.webkitAudioContext)(),o=a.createOscillator();o.connect(a.destination);o.frequency.value=880;o.start();setTimeout(()=>o.stop(),90)}catch(e){}}
+
+function showItem(code){
+  curCode=code;
+  $('cur').classList.remove('hidden');
+  const name=nameOf(code);
+  $('codeView').textContent='コード: '+code+(window.lastRaw&&window.lastRaw!==code?'（読み取り値: '+window.lastRaw+'）':'');window.lastRaw=null;
+  $('gLink').href='https://www.google.com/search?q='+encodeURIComponent(code);
+  $('yLink').href='https://shopping.yahoo.co.jp/search?p='+encodeURIComponent(code);
+  $('nameView').textContent=name||'（未登録）';
+  $('regBox').classList.toggle('hidden',!!name);
+  $('regName').value='';
+  $('count').value=inv[code]?inv[code].count:'';
+  $('cur').scrollIntoView({behavior:'smooth',block:'nearest'});
+  $('lookupMsg').textContent='';
+  if(name) $('count').focus();
+  else {$('regName').focus();lookup(code)}
+}
+function validCode(c){
+  if(!/^\d+$/.test(c)||![8,12,13,14].includes(c.length))return false;
+  const d=c.split('').map(Number),k=d.pop();let t=0;
+  d.reverse().forEach((x,i)=>t+=x*(i%2?1:3));
+  return (10-t%10)%10===k;
+}
+async function zxDecode(bmp){
+  if(!window.ZXingWASM)return null;
+    const opt={tryHarder:true,tryRotate:true,tryInvert:true,maxNumberOfSymbols:3};
+  const tryRect=async(x,y,ww,hh)=>{const c=document.createElement('canvas');const k=ww<1600?1600/ww:1;c.width=Math.round(ww*k);c.height=Math.round(hh*k);
+    const g=c.getContext('2d');g.imageSmoothingEnabled=false;g.drawImage(bmp,x,y,ww,hh,0,0,c.width,c.height);
+    for(const r of await ZXingWASM.readBarcodes(g.getImageData(0,0,c.width,c.height),opt)){if(validCode(normalize(r.text)))return r.text}return null};
+  let r=await tryRect(0,0,bmp.width,bmp.height);if(r)return r;
+  for(const f of [0,.25,.5]){r=await tryRect(0,Math.round(bmp.height*f),bmp.width,Math.round(bmp.height*.5));if(r)return r;
+    r=await tryRect(0,Math.round(bmp.height*f),Math.round(bmp.width*.6),Math.round(bmp.height*.5));if(r)return r}
+  return null;
+}
+async function onScan(text){
+  if(!validCode(normalize(text)))return;
+  if(busy) return; busy=true;
+  beep(); window.lastRaw=text; showItem(normalize(text));
+  setTimeout(()=>busy=false,1500);
+}
+async function startScan(){
+  $('camErr').classList.add('hidden');
+  $('reader').classList.remove('hidden');
+  try{
+    scanner=new Html5Qrcode('reader',{formatsToSupport:[
+      Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,Html5QrcodeSupportedFormats.CODE_128,
+      Html5QrcodeSupportedFormats.CODE_39,Html5QrcodeSupportedFormats.ITF,Html5QrcodeSupportedFormats.QR_CODE,
+      Html5QrcodeSupportedFormats.RSS_14,Html5QrcodeSupportedFormats.RSS_EXPANDED,Html5QrcodeSupportedFormats.UPC_A],
+      useBarCodeDetectorIfSupported:true});
+    await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:260,height:140}},onScan,()=>{});
+    $('scanBtn').textContent='⏹ 読み取りを停止';
+  }catch(e){
+    $('reader').classList.add('hidden'); scanner=null;
+    $('camErr').textContent='カメラを起動できません。カメラの許可を確認するか、下の手入力欄をお使いください。';
+    $('camErr').classList.remove('hidden');
+  }
+}
+async function stopScan(){
+  try{await scanner.stop();scanner.clear()}catch(e){}
+  scanner=null;$('reader').classList.add('hidden');$('scanBtn').textContent='📷 バーコードを読み取る';
+}
+let stream=null,loopOn=false;
+async function stopAll(){
+  loopOn=false;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
+  $('vwrap').classList.add('hidden');if(scanner)await stopScan();
+  $('scanBtn').textContent='📷 バーコードを読み取る';
+}
+async function startScanZ(){
+  $('camErr').classList.add('hidden');
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:3840},height:{ideal:2160}}});
+    const v=$('vid');v.srcObject=stream;await v.play();
+    $('vwrap').classList.remove('hidden');$('scanBtn').textContent='⏹ 読み取りを停止';
+    const tr=stream.getVideoTracks()[0],cap=tr.getCapabilities?tr.getCapabilities():{};
+    try{if(cap.focusMode&&cap.focusMode.includes('continuous'))await tr.applyConstraints({advanced:[{focusMode:'continuous'}]})}catch(e){}
+    if(cap.zoom){const z=$('zoom');z.min=cap.zoom.min;z.max=cap.zoom.max;z.step=cap.zoom.step||0.1;z.value=cap.zoom.min;z.classList.remove('hidden');
+      z.oninput=()=>tr.applyConstraints({advanced:[{zoom:+z.value}]}).catch(()=>{})}
+    loopOn=true;scanLoop();
+  }catch(e){
+    await stopAll();
+    $('camErr').textContent='カメラを起動できません。ブラウザのカメラ許可を確認してください。';$('camErr').classList.remove('hidden');
+  }
+}
+async function scanLoop(){
+  if(!loopOn)return;
+  try{
+    const v=$('vid');
+    if(v.videoWidth){
+      const sw=Math.round(v.videoWidth*.9),sh=Math.round(v.videoHeight*.4),sx=Math.round(v.videoWidth*.05),sy=Math.round(v.videoHeight*.3);
+      const k=sw<1400?1400/sw:1,cv=document.createElement('canvas');cv.width=Math.round(sw*k);cv.height=Math.round(sh*k);
+      const cx=cv.getContext('2d');cx.imageSmoothingEnabled=false;cx.drawImage(v,sx,sy,sw,sh,0,0,cv.width,cv.height);
+      const rs=await ZXingWASM.readBarcodes(cx.getImageData(0,0,cv.width,cv.height),{tryHarder:true,tryRotate:true,maxNumberOfSymbols:2});
+      for(const r of rs){if(validCode(normalize(r.text))){busy=false;onScan(r.text);await stopAll();return}}
+    }
+  }catch(e){}
+  setTimeout(scanLoop,120);
+}
+$('scanBtn').onclick=()=>{if(loopOn||scanner){stopAll();return}window.ZXingWASM?startScanZ():startScan()};
+$('manualBtn').onclick=()=>{const v=normalize($('manual').value);if(v){showItem(v);$('manual').value=''}};
+
+$('minus').onclick=()=>{$('count').value=Math.max(0,(+$('count').value||0)-1)};
+$('plus').onclick=()=>{$('count').value=(+$('count').value||0)+1};
+$('save').onclick=()=>{
+  if(!curCode) return;
+  const rn=$('regName').value.trim();
+  if(!nameOf(curCode)){ if(!rn){$('regName').focus();return} master[curCode]=rn; store('master',master); }
+  const c=$('count').value;
+  if(c===''){$('count').focus();return}
+  inv[curCode]={count:Math.max(0,parseInt(c,10)||0),time:new Date().toLocaleString('ja-JP')};
+  store('inv',inv); $('cur').classList.add('hidden'); curCode=null; render();
+};
+
+function esc(s){return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
+function render(){
+  const ks=Object.keys(inv).sort((a,b)=>inv[b].time.localeCompare(inv[a].time));
+  $('total').textContent=ks.length;
+  $('list').innerHTML=ks.map(k=>`<div class="item"><div style="min-width:0"><div>${esc(nameOf(k)||'(名称なし)')}</div><div class="sub">${esc(k)}</div></div><div class="row"><b>${inv[k].count}</b><button class="sec" style="padding:6px 10px" data-e="${esc(k)}">編集</button><button class="del" data-d="${esc(k)}">✕</button></div></div>`).join('')||'<div class="sub" style="padding:8px 0">まだありません</div>';
+  $('masterCnt').textContent=' 内蔵 '+Object.keys(builtin.c||{}).length+'件／自分の登録 '+Object.keys(master).length+'件';
+}
+$('list').onclick=e=>{
+  const d=e.target.dataset.d,ed=e.target.dataset.e;
+  if(d&&confirm('この行を削除しますか？')){delete inv[d];store('inv',inv);render()}
+  if(ed) showItem(ed);
+};
+$('clearAll').onclick=()=>{if(confirm('棚卸し一覧をすべて消去しますか？（商品マスタは残ります）')){inv={};store('inv',inv);render()}};
+$('copyBtn').onclick=async()=>{
+  const q=s=>'"'+String(s).replace(/"/g,'""')+'"';
+  const csv='コード,商品名,数量,日時\n'+Object.keys(inv).map(k=>[q(k),q(nameOf(k)),inv[k].count,q(inv[k].time)].join(',')).join('\n');
+  try{await navigator.clipboard.writeText(csv);$('copyBtn').textContent='コピーしました'}catch(e){$('csvOut').classList.remove('hidden');$('csvOut').value=csv;$('csvOut').select()}
+  setTimeout(()=>$('copyBtn').textContent='CSVコピー',2000);
+};
+$('importBtn').onclick=()=>{
+  $('masterIn').value.split(/\r?\n/).forEach(l=>{const i=l.indexOf(',');if(i>0){const c=normalize(l.slice(0,i).replace(/"/g,'').trim()),n=l.slice(i+1).replace(/"/g,'').trim();if(c&&n)master[c]=n}});
+  store('master',master);$('masterIn').value='';render();
+};
+$('photoBtn').onclick=()=>$('photoIn').click();
+$('photoIn').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;$('camErr').classList.add('hidden');
+  try{
+    let r=null;
+    try{r=await zxDecode(await createImageBitmap(f))}catch(z){console.error(z)}
+    if(!r){const h=new Html5Qrcode('hid',{useBarCodeDetectorIfSupported:true});r=await h.scanFile(f,false)}
+    busy=false;onScan(r)}
+  catch(err){$('camErr').textContent='バーコードを読み取れませんでした。バーコードを大きく、ピントを合わせて撮り直してください。';$('camErr').classList.remove('hidden')}
+  e.target.value='';
+};
+let rows=[];
+function parseLine(l){const o=[];let c='',q=false;for(const ch of l){if(ch=='"')q=!q;else if(ch==','&&!q){o.push(c);c=''}else c+=ch}o.push(c);return o}
+$('masterFile').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const buf=await f.arrayBuffer();let t;
+  try{t=new TextDecoder('utf-8',{fatal:true}).decode(buf)}catch(_){t=new TextDecoder('shift_jis').decode(buf)}
+  rows=t.split(/\r?\n/).filter(Boolean).map(parseLine);
+  if(rows.length<2){$('mapMsg').textContent='読み込めませんでした';return}
+  const n=Math.max(...rows.slice(0,50).map(r=>r.length));
+  const samp=rows.slice(1,30);let gc=0,gn=0,best=-1;
+  const opts=[];
+  for(let i=0;i<n;i++){
+    const ex=(rows[1][i]||'').slice(0,18);
+    opts.push(`<option value="${i}">${i+1}列目：${esc((rows[0][i]||'').slice(0,12))}（例 ${esc(ex)}）</option>`);
+    const digits=samp.filter(r=>/^\d{13,14}$/.test((r[i]||'').trim())).length;
+    if(digits>best&&digits>0){best=digits;gc=i}
+  }
+  let bl=-1;for(let i=0;i<n;i++){if(i===gc)continue;const l=samp.filter(r=>/[ぁ-んァ-ヶ一-龠]/.test(r[i]||'')).reduce((a,r)=>a+r[i].length,0);if(l>bl){bl=l;gn=i}}
+  $('colCode').innerHTML=opts.join('');$('colName').innerHTML=opts.join('');
+  $('colCode').value=gc;$('colName').value=gn;
+  $('mapBox').classList.remove('hidden');$('mapMsg').textContent=rows.length-1+'行を読み込みました。列を確認してください。';
+};
+$('mapGo').onclick=()=>{
+  const ci=+$('colCode').value,ni=+$('colName').value;let k=0;
+  rows.slice(1).forEach(r=>{const c=normalize((r[ci]||'').replace(/"/g,'').trim()),n=(r[ni]||'').trim();if(c&&n&&/^\d+$/.test(c)){master[c]=n;k++}});
+  const ok=store('master',master);
+  $('mapMsg').textContent=ok?k+'件の商品名を登録しました':'容量オーバーで保存できませんでした。CSVを絞って（使う薬品だけに）再度お試しください。';
+  if(ok)$('mapBox').classList.add('hidden');render();
+};
+async function getName(code,id){
+  if(id){try{const r=await fetch('https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid='+encodeURIComponent(id)+'&jan_code='+encodeURIComponent(code)+'&results=1');const j=await r.json();const h=j.hits&&j.hits[0];if(h)return{n:h.name,src:'Yahoo!ショッピング'}}catch(e){}}
+  try{const r=await fetch('https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+'.json?fields=product_name,brands');const j=await r.json();if(j.status===1&&j.product&&j.product.product_name)return{n:((j.product.brands||'')+' '+j.product.product_name).trim(),src:'Open Food Facts'}}catch(e){}
+  return null;
+}
+async function lookup(code){
+  let id='';try{id=localStorage.getItem('appid')||''}catch(e){}
+  $('lookupMsg').textContent='商品情報を検索中…';
+  const r=await getName(code,id);if(curCode!==code)return;
+  if(r){$('regName').value=r.n;$('lookupMsg').textContent=r.src+'から取得しました。必要なら修正して保存してください'}
+  else $('lookupMsg').textContent='自動では見つかりませんでした。上のリンクで調べて入力してください'+(id?'':'（Client ID設定でYahoo!も使えます）');
+}
+$('idSave').onclick=()=>{try{localStorage.setItem('appid',$('appid').value.trim());$('idMsg').textContent='保存しました'}catch(e){$('idMsg').textContent='保存できませんでした'}};
+try{$('appid').value=localStorage.getItem('appid')||''}catch(e){}
+
+
+// 薬品名検索
+let rev=null;
+$('nameQ').oninput=()=>{
+  const q=$('nameQ').value.normalize('NFKC').trim().toLowerCase(),box=$('nameRes');
+  if(q.length<2||!builtin.n){box.innerHTML='';return}
+  if(!rev){rev={};for(const k in builtin.c){const v=builtin.c[k],i=v>>2;if(rev[i]===undefined||(v&3)<(builtin.c[rev[i]]&3))rev[i]=k}}
+  const out=[];
+  for(let i=0;i<builtin.n.length&&out.length<20;i++)if(builtin.n[i].toLowerCase().includes(q)&&rev[i])out.push(i);
+  box.innerHTML=out.map(i=>`<div class="item" style="cursor:pointer" data-k="${rev[i]}"><span>${esc(builtin.n[i])}</span></div>`).join('')||'<div class="sub">該当なし</div>';
+};
+$('nameRes').onclick=e=>{const d=e.target.closest('[data-k]');if(d){showItem(d.dataset.k);$('nameRes').innerHTML='';$('nameQ').value=''}};
+// 印字数字OCR
+$('ocrBtn').onclick=()=>$('ocrIn').click();
+$('ocrIn').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;e.target.value='';
+  $('camErr').textContent='数字を読み取り中…（初回は少し時間がかかります）';$('camErr').classList.remove('hidden');
+  try{
+    const w=await Tesseract.createWorker('eng');
+    await w.setParameters({tessedit_char_whitelist:'0123456789()'});
+    const {data}=await w.recognize(f);await w.terminate();
+    const ds=data.text.replace(/\D/g,'');let found=null;
+    for(const L of [14,13,8])for(let i=0;i+L<=ds.length&&!found;i++){const c=ds.substr(i,L);if(validCode(c))found=c}
+    if(found){$('camErr').classList.add('hidden');busy=false;onScan(found)}
+    else $('camErr').textContent='数字を読み取れませんでした。数字を大きく写して撮り直してください。'
+  }catch(err){$('camErr').textContent='文字認識に失敗しました。薬品名検索をお使いください。'}
+};
+render();
+</script>
+</body>
+</html>
