@@ -332,6 +332,174 @@ let rev=null;
 $('nameQ').oninput=()=>{
   const q=$('nameQ').value.normalize('NFKC').trim().toLowerCase(),box=$('nameRes');
   if(q.length<2||!builtin.n){box.innerHTML='';return}
+  if(!rev){rev={};for(const k (normalize(r.text)))return r.text}return null};
+  let r=await tryRect(0,0,bmp.width,bmp.height);if(r)return r;
+  for(const f of [0,.25,.5]){r=await tryRect(0,Math.round(bmp.height*f),bmp.width,Math.round(bmp.height*.5));if(r)return r;
+    r=await tryRect(0,Math.round(bmp.height*f),Math.round(bmp.width*.6),Math.round(bmp.height*.5));if(r)return r}
+  return null;
+}
+async function onScan(text){
+  if(!validCode(normalize(text)))return;
+  if(busy) return; busy=true;
+  beep(); window.lastRaw=text; showItem(normalize(text));
+  setTimeout(()=>busy=false,1500);
+}
+async function startScan(){
+  $('camErr').classList.add('hidden');
+  $('reader').classList.remove('hidden');
+  try{
+    scanner=new Html5Qrcode('reader',{formatsToSupport:[
+      Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,Html5QrcodeSupportedFormats.CODE_128,
+      Html5QrcodeSupportedFormats.CODE_39,Html5QrcodeSupportedFormats.ITF,Html5QrcodeSupportedFormats.QR_CODE,
+      Html5QrcodeSupportedFormats.RSS_14,Html5QrcodeSupportedFormats.RSS_EXPANDED,Html5QrcodeSupportedFormats.UPC_A],
+      useBarCodeDetectorIfSupported:true});
+    await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:260,height:140}},onScan,()=>{});
+    $('scanBtn').textContent='⏹ 読み取りを停止';
+  }catch(e){
+    $('reader').classList.add('hidden'); scanner=null;
+    $('camErr').textContent='カメラを起動できません。カメラの許可を確認するか、下の手入力欄をお使いください。';
+    $('camErr').classList.remove('hidden');
+  }
+}
+async function stopScan(){
+  try{await scanner.stop();scanner.clear()}catch(e){}
+  scanner=null;$('reader').classList.add('hidden');$('scanBtn').textContent='📷 バーコードを読み取る';
+}
+let stream=null,loopOn=false;
+async function stopAll(){
+  loopOn=false;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
+  $('vwrap').classList.add('hidden');if(scanner)await stopScan();
+  $('scanBtn').textContent='📷 バーコードを読み取る';
+}
+async function startScanZ(){
+  $('camErr').classList.add('hidden');
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:3840},height:{ideal:2160}}});
+    const v=$('vid');v.srcObject=stream;await v.play();
+    $('vwrap').classList.remove('hidden');$('scanBtn').textContent='⏹ 読み取りを停止';
+    const tr=stream.getVideoTracks()[0],cap=tr.getCapabilities?tr.getCapabilities():{};
+    try{if(cap.focusMode&&cap.focusMode.includes('continuous'))await tr.applyConstraints({advanced:[{focusMode:'continuous'}]})}catch(e){}
+    if(cap.zoom){const z=$('zoom');z.min=cap.zoom.min;z.max=cap.zoom.max;z.step=cap.zoom.step||0.1;z.value=cap.zoom.min;z.classList.remove('hidden');
+      z.oninput=()=>tr.applyConstraints({advanced:[{zoom:+z.value}]}).catch(()=>{})}
+    loopOn=true;scanLoop();
+  }catch(e){
+    await stopAll();
+    $('camErr').textContent='カメラを起動できません。ブラウザのカメラ許可を確認してください。';$('camErr').classList.remove('hidden');
+  }
+}
+async function scanLoop(){
+  if(!loopOn)return;
+  try{
+    const v=$('vid');
+    if(v.videoWidth){
+      const sw=Math.round(v.videoWidth*.9),sh=Math.round(v.videoHeight*.4),sx=Math.round(v.videoWidth*.05),sy=Math.round(v.videoHeight*.3);
+      const k=sw<1400?1400/sw:1,cv=document.createElement('canvas');cv.width=Math.round(sw*k);cv.height=Math.round(sh*k);
+      const cx=cv.getContext('2d');cx.imageSmoothingEnabled=false;cx.drawImage(v,sx,sy,sw,sh,0,0,cv.width,cv.height);
+      const rs=await ZXingWASM.readBarcodes(cx.getImageData(0,0,cv.width,cv.height),{tryHarder:true,tryRotate:true,maxNumberOfSymbols:2});
+      for(const r of rs){if(validCode(normalize(r.text))){busy=false;onScan(r.text);await stopAll();return}}
+    }
+  }catch(e){}
+  setTimeout(scanLoop,120);
+}
+$('scanBtn').onclick=()=>{if(loopOn||scanner){stopAll();return}window.ZXingWASM?startScanZ():startScan()};
+$('manualBtn').onclick=()=>{const v=normalize($('manual').value);if(v){showItem(v);$('manual').value=''}};
+
+$('minus').onclick=()=>{$('count').value=Math.max(0,(+$('count').value||0)-1)};
+$('plus').onclick=()=>{$('count').value=(+$('count').value||0)+1};
+$('save').onclick=()=>{
+  if(!curCode) return;
+  const rn=$('regName').value.trim();
+  if(!nameOf(curCode)){ if(!rn){$('regName').focus();return} master[curCode]=rn; store('master',master); }
+  const c=$('count').value;
+  if(c===''){$('count').focus();return}
+  inv[curCode]={count:Math.max(0,parseInt(c,10)||0),time:new Date().toLocaleString('ja-JP')};
+  store('inv',inv); $('cur').classList.add('hidden'); curCode=null; render();
+};
+
+function esc(s){return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
+function render(){
+  const ks=Object.keys(inv).sort((a,b)=>inv[b].time.localeCompare(inv[a].time));
+  $('total').textContent=ks.length;
+  $('list').innerHTML=ks.map(k=>`<div class="item"><div style="min-width:0"><div>${esc(nameOf(k)||'(名称なし)')}</div><div class="sub">${esc(k)}</div></div><div class="row"><b>${inv[k].count}</b><button class="sec" style="padding:6px 10px" data-e="${esc(k)}">編集</button><button class="del" data-d="${esc(k)}">✕</button></div></div>`).join('')||'<div class="sub" style="padding:8px 0">まだありません</div>';
+  $('masterCnt').textContent=' 内蔵 '+Object.keys(builtin.c||{}).length+'件／自分の登録 '+Object.keys(master).length+'件';
+}
+$('list').onclick=e=>{
+  const d=e.target.dataset.d,ed=e.target.dataset.e;
+  if(d&&confirm('この行を削除しますか？')){delete inv[d];store('inv',inv);render()}
+  if(ed) showItem(ed);
+};
+$('clearAll').onclick=()=>{if(confirm('棚卸し一覧をすべて消去しますか？（商品マスタは残ります）')){inv={};store('inv',inv);render()}};
+$('copyBtn').onclick=async()=>{
+  const q=s=>'"'+String(s).replace(/"/g,'""')+'"';
+  const csv='コード,商品名,数量,日時\n'+Object.keys(inv).map(k=>[q(k),q(nameOf(k)),inv[k].count,q(inv[k].time)].join(',')).join('\n');
+  try{await navigator.clipboard.writeText(csv);$('copyBtn').textContent='コピーしました'}catch(e){$('csvOut').classList.remove('hidden');$('csvOut').value=csv;$('csvOut').select()}
+  setTimeout(()=>$('copyBtn').textContent='CSVコピー',2000);
+};
+$('importBtn').onclick=()=>{
+  $('masterIn').value.split(/\r?\n/).forEach(l=>{const i=l.indexOf(',');if(i>0){const c=normalize(l.slice(0,i).replace(/"/g,'').trim()),n=l.slice(i+1).replace(/"/g,'').trim();if(c&&n)master[c]=n}});
+  store('master',master);$('masterIn').value='';render();
+};
+$('photoBtn').onclick=()=>$('photoIn').click();
+$('photoIn').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;$('camErr').classList.add('hidden');
+  try{
+    let r=null;
+    try{r=await zxDecode(await createImageBitmap(f))}catch(z){console.error(z)}
+    if(!r){const h=new Html5Qrcode('hid',{useBarCodeDetectorIfSupported:true});r=await h.scanFile(f,false)}
+    busy=false;onScan(r)}
+  catch(err){$('camErr').textContent='バーコードを読み取れませんでした。バーコードを大きく、ピントを合わせて撮り直してください。';$('camErr').classList.remove('hidden')}
+  e.target.value='';
+};
+let rows=[];
+function parseLine(l){const o=[];let c='',q=false;for(const ch of l){if(ch=='"')q=!q;else if(ch==','&&!q){o.push(c);c=''}else c+=ch}o.push(c);return o}
+$('masterFile').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const buf=await f.arrayBuffer();let t;
+  try{t=new TextDecoder('utf-8',{fatal:true}).decode(buf)}catch(_){t=new TextDecoder('shift_jis').decode(buf)}
+  rows=t.split(/\r?\n/).filter(Boolean).map(parseLine);
+  if(rows.length<2){$('mapMsg').textContent='読み込めませんでした';return}
+  const n=Math.max(...rows.slice(0,50).map(r=>r.length));
+  const samp=rows.slice(1,30);let gc=0,gn=0,best=-1;
+  const opts=[];
+  for(let i=0;i<n;i++){
+    const ex=(rows[1][i]||'').slice(0,18);
+    opts.push(`<option value="${i}">${i+1}列目：${esc((rows[0][i]||'').slice(0,12))}（例 ${esc(ex)}）</option>`);
+    const digits=samp.filter(r=>/^\d{13,14}$/.test((r[i]||'').trim())).length;
+    if(digits>best&&digits>0){best=digits;gc=i}
+  }
+  let bl=-1;for(let i=0;i<n;i++){if(i===gc)continue;const l=samp.filter(r=>/[ぁ-んァ-ヶ一-龠]/.test(r[i]||'')).reduce((a,r)=>a+r[i].length,0);if(l>bl){bl=l;gn=i}}
+  $('colCode').innerHTML=opts.join('');$('colName').innerHTML=opts.join('');
+  $('colCode').value=gc;$('colName').value=gn;
+  $('mapBox').classList.remove('hidden');$('mapMsg').textContent=rows.length-1+'行を読み込みました。列を確認してください。';
+};
+$('mapGo').onclick=()=>{
+  const ci=+$('colCode').value,ni=+$('colName').value;let k=0;
+  rows.slice(1).forEach(r=>{const c=normalize((r[ci]||'').replace(/"/g,'').trim()),n=(r[ni]||'').trim();if(c&&n&&/^\d+$/.test(c)){master[c]=n;k++}});
+  const ok=store('master',master);
+  $('mapMsg').textContent=ok?k+'件の商品名を登録しました':'容量オーバーで保存できませんでした。CSVを絞って（使う薬品だけに）再度お試しください。';
+  if(ok)$('mapBox').classList.add('hidden');render();
+};
+async function getName(code,id){
+  if(id){try{const r=await fetch('https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid='+encodeURIComponent(id)+'&jan_code='+encodeURIComponent(code)+'&results=1');const j=await r.json();const h=j.hits&&j.hits[0];if(h)return{n:h.name,src:'Yahoo!ショッピング'}}catch(e){}}
+  try{const r=await fetch('https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+'.json?fields=product_name,brands');const j=await r.json();if(j.status===1&&j.product&&j.product.product_name)return{n:((j.product.brands||'')+' '+j.product.product_name).trim(),src:'Open Food Facts'}}catch(e){}
+  return null;
+}
+async function lookup(code){
+  let id='';try{id=localStorage.getItem('appid')||''}catch(e){}
+  $('lookupMsg').textContent='商品情報を検索中…';
+  const r=await getName(code,id);if(curCode!==code)return;
+  if(r){$('regName').value=r.n;$('lookupMsg').textContent=r.src+'から取得しました。必要なら修正して保存してください'}
+  else $('lookupMsg').textContent='自動では見つかりませんでした。上のリンクで調べて入力してください'+(id?'':'（Client ID設定でYahoo!も使えます）');
+}
+$('idSave').onclick=()=>{try{localStorage.setItem('appid',$('appid').value.trim());$('idMsg').textContent='保存しました'}catch(e){$('idMsg').textContent='保存できませんでした'}};
+try{$('appid').value=localStorage.getItem('appid')||''}catch(e){}
+
+
+// 薬品名検索
+let rev=null;
+$('nameQ').oninput=()=>{
+  const q=$('nameQ').value.normalize('NFKC').trim().toLowerCase(),box=$('nameRes');
+  if(q.length<2||!builtin.n){box.innerHTML='';return}
   if(!rev){rev={};for(const k alize(r.text)))return r.text}return null};
   let r=await tryRect(0,0,bmp.width,bmp.height);if(r)return r;
   for(const f of [0,.25,.5]){r=await tryRect(0,Math.round(bmp.height*f),bmp.width,Math.round(bmp.height*.5));if(r)return r;
